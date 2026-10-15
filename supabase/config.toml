@@ -1,0 +1,2 @@
+[functions.manga-catalog]
+verify_jwt = true
