@@ -35,7 +35,8 @@ try:
         page.locator('#progress-form button[type=submit],#progress-form button.primary').click()
         assert page.locator('#stat-completed').text_content()=='1'
         page.locator('nav [data-view=achievements]').click()
-        assert page.locator('.achievement.unlocked').count()==3
+        assert page.locator('.achievement.unlocked').count()>=3
+        assert page.evaluate('TsugiDomain.trophies.length')==200
         page.locator('nav [data-view=library]').click()
         page.reload();page.locator('#library-grid .card-title').wait_for()
         assert page.evaluate("JSON.parse(localStorage.getItem('tsugi-library-v1')).entries[0].progress")==519

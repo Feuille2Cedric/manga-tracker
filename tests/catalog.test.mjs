@@ -1,0 +1,11 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {isExplicit,isExplicitUpdate,ContentFilteredError} from '../site/content-policy.mjs';
+import {searchMedia,getMedia,volumeSegments} from '../site/catalog.mjs';
+const safe={id:'1',type:'manga',attributes:{canonicalTitle:'Adventure',ageRating:'R'},relationships:{categories:{data:[{id:'action',type:'categories'}]}}};
+const adult={id:'2',type:'manga',attributes:{canonicalTitle:'Blocked fixture',ageRating:null},relationships:{categories:{data:[{id:'explicit',type:'categories'}]}}};
+const included=[{id:'explicit',type:'categories',attributes:{slug:'hentai',title:'Hentai'}},{id:'action',type:'categories',attributes:{slug:'action'}}];
+test('ordinary adult characters do not classify One Piece as pornography',()=>{assert(!isExplicitUpdate({title:'One Piece',genres:[{genre:'Shounen'}],categories:[{category:'Immature Adult/s'}]}));});
+test('blocks explicit ratings/categories without excluding all mature action series',()=>{assert(!isExplicit(safe,included));assert(isExplicit(adult,included));assert(isExplicit({attributes:{ageRating:'R18'}}));assert(isExplicit({attributes:{nsfw:true}}));assert(isExplicitUpdate({title:'Fixture',genres:[{genre:'Adult'}]}));});
+test('search filters before exposing titles or cover URLs, with next-page preserved',async()=>{const fetcher=async url=>{assert(url.includes('include=categories%2Cgenres'));return new Response(JSON.stringify({data:[safe,adult],included,links:{next:'next'}}));};const result=await searchMedia({},fetcher);assert.deepEqual(result.data.map(d=>d.id),['manga:1']);assert(result.hasNext);});
+test('direct details cannot bypass content filter',async()=>{await assert.rejects(()=>getMedia('manga:2',async()=>new Response(JSON.stringify({data:adult,included}))),ContentFilteredError);});
+test('volume conversion rejects gaps and never guesses the unfinished final volume',()=>{const chapters=[1,2,3,4,5].map(n=>({attributes:{number:n,volumeNumber:n<=2?1:2}}));assert.deepEqual(volumeSegments(chapters,5,true).map(s=>s.end),[2,5]);assert.deepEqual(volumeSegments(chapters,null,false).map(s=>s.end),[2]);assert.deepEqual(volumeSegments(chapters.slice(1),5,true),[]);});
