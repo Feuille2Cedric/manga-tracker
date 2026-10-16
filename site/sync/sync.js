@@ -115,16 +115,17 @@
     const images=await this.images(merged,remote.document);
     try{await this.a.validate(merged,images);}catch(e){this.pendingConflict={local,remote};q('#sync-conflict').hidden=false;q('.sync-dialog').showModal();this.message('Ces versions ne peuvent pas être réunies : '+e.message);this.status('Choix de version nécessaire');return;}
     if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner)return;
-    // Prevent edits only during the final commit; uploads/downloads happen beforehand.
-    release=this.a.freeze();
-    if(this.generation!==ticket||this.user?.id!==owner)return;
+    // Network requests must never lock the page: a slow save can take indefinitely.
     let rev=remote.revision;
     if(!same(merged,remote.document)||!rev){
      const {data,error}=await this.io.rpc('personal_app_save',{p_app:this.a.app,p_revision:rev,p_document:merged});if(error)throw error;
      if(data.conflict){this.status('Autre appareil actif · nouvelle tentative…');return;}
      rev=data.revision;
     }
-    if(this.user?.id!==owner)return;
+    // If edits happened during the save, retain the previous merge base and local
+    // document. The next cycle reconciles them with the snapshot just saved.
+    if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner)return;
+    release=this.a.freeze();
     if(!same(local,merged)){this.applying=true;await this.a.apply(merged,images);this.applying=false;}
     await this.metadata({owner,revision:rev,base:merged});
     this.status('✓ Synchronisé');this.message('Connecté : '+this.user.email+'\nTes données sont à jour.');
