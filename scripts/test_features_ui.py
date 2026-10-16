@@ -49,6 +49,12 @@ try:
         assert page.locator('#links-list a').get_attribute('href')=='https://example.com/lecture'
         page.locator('nav [data-view=library]').click();page.locator('[data-kind=manga]').click()
         page.locator('#library-grid [data-detail="manga:111"]').first.click()
+        page.locator('[name=readingUrl]').fill('https://example.com/dragon-ball')
+        page.locator('#progress-form button.primary').click()
+        assert page.evaluate("entryFor('manga:111').readingUrl")=='https://example.com/dragon-ball'
+        assert page.evaluate("entryFor('anime:199').readingUrl || ''")==''
+        page.locator('#library-grid [data-detail="manga:111"]').first.click()
+        assert page.locator('#open-reading-link').get_attribute('href')=='https://example.com/dragon-ball'
         page.locator('.units-panel summary').first.click()
         assert page.locator('#unit-form').count()==0
         page.locator('#load-volumes').click();page.locator('[data-finish-unit="2"]').wait_for()
@@ -78,6 +84,7 @@ try:
         page.reload();page.wait_for_function('window.TsugiEnhancements')
         assert page.evaluate('library.readingLinks.length')==1
         assert page.evaluate("entryFor('manga:111').segments.length")==2
+        assert page.evaluate("entryFor('manga:111').readingUrl")=='https://example.com/dragon-ball'
         assert not errors,errors
         print('PASS: mixed bulk move, category counts, size sorting, private links, tome conversion/import, season completion without duplicates, 200 paginated trophies, content filtering, daily refresh and mobile layout.')
         browser.close()

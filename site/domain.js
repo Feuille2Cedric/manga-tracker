@@ -18,6 +18,7 @@
     for(const e of doc.entries){
       if(!e||typeof e.id!=='string'||!/^(manga|anime):[1-9][0-9]*$|^manual:[a-zA-Z0-9-]+$/.test(e.id)||ids.has(e.id)||!['manga','anime'].includes(e.kind)||(!e.id.startsWith('manual:')&&!e.id.startsWith(e.kind+':'))||typeof e.title!=='string'||!e.title.trim()||e.title.length>300||!Number.isSafeInteger(e.progress)||e.progress<0||!statuses.includes(e.status)||!Number.isFinite(e.updated)||e.manualTotal!=null&&(!Number.isSafeInteger(e.manualTotal)||e.manualTotal<1)||e.muId!=null&&!/^mu:[1-9][0-9]*$/.test(e.muId))throw Error('Une entrée de la sauvegarde est invalide.');
       ids.add(e.id);
+      if(e.readingUrl!==undefined&&(typeof e.readingUrl!=='string'||e.readingUrl.length>2048||e.readingUrl!==''&&!safeReadingUrl(e.readingUrl)))throw Error('Lien de lecture invalide.');
       if(e.segments!==undefined)validateSegments(e.segments);
       if(e.edition!==undefined&&(typeof e.edition!=='string'||e.edition.length>200))throw Error('Édition invalide.');
     }
