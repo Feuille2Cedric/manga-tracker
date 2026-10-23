@@ -20,8 +20,12 @@ try:
         pages=[]
         for i in range(2):
             context=browser.new_context();page=context.new_page();pages.append(page)
+            page.on('pageerror',lambda error:print('Browser error:',str(error)))
             page.goto('http://127.0.0.1:3370/')
-            page.wait_for_function('window.tsugiSync?.client && window.tsugiSync?.db')
+            try:page.wait_for_function('Boolean(window.tsugiSync?.client && window.tsugiSync?.db)')
+            except:
+                print('Startup diagnostics:',page.evaluate("({url:location.href,title:document.title,scripts:document.scripts.length,message:document.querySelector('.sync-message')?.textContent})"))
+                raise
             page.locator('#sync-account').click();page.locator('#sync-email').fill(email);page.locator('#auth-password').fill(password);page.locator('#auth-submit').click()
             page.wait_for_function("tsugiSync.user && document.querySelector('#sync-status').textContent.includes('Synchronisé')",timeout=45000)
             page.locator('.sync-close').click()
@@ -59,14 +63,28 @@ try:
         a.evaluate("""()=>{for(let i=1;i<=3;i++){
             persist({entries:[...library.entries,{id:'manual:offline-'+i,kind:'manga',title:'Offline manga '+i,progress:i,status:'reading',manualTotal:50,muId:null,updated:Date.now()}]});
         }}""")
+        # Serve the local app again while the remote data service stays unreachable.
+        a.route('**/rest/v1/**',lambda route:route.abort())
+        a.context.set_offline(False)
+        a.reload();a.wait_for_function('window.tsugiSync?.user && TsugiApp.read().entries.length===4',timeout=20000)
         b.locator('[data-increment]').click()
         b.wait_for_function('tsugiSync.meta.base?.entries[0]?.progress===14',timeout=20000)
-        a.context.set_offline(False)
+        a.unroute('**/rest/v1/**')
+        a.evaluate("window.dispatchEvent(new Event('online'))")
         a.wait_for_function('tsugiSync.meta.base?.entries.length===4',timeout=25000)
         b.wait_for_function('TsugiApp.read().entries.length===4',timeout=25000)
         assert a.evaluate('TsugiApp.read()')==b.evaluate('TsugiApp.read()')
         assert a.evaluate('TsugiApp.read().entries[0].progress')==14
         print('PASS: three offline manga additions merge with progress from the other PC.')
+        a.route('**/rest/v1/**',lambda route:route.abort())
+        a.evaluate("change(library.entries[0].id,{progress:18})")
+        b.evaluate("change(library.entries[0].id,{progress:20})")
+        b.wait_for_function('tsugiSync.meta.base?.entries[0]?.progress===20',timeout=20000)
+        a.unroute('**/rest/v1/**');a.evaluate("window.dispatchEvent(new Event('online'))")
+        a.wait_for_function('tsugiSync.meta.base?.entries[0]?.progress===20',timeout=25000)
+        assert not a.evaluate('Boolean(tsugiSync.pendingConflict)')
+        assert a.evaluate("JSON.parse(localStorage.getItem('tsugi-sync-recovery-v1')).some(b=>b.owner===tsugiSync.user.id && b.local.entries[0].progress===18 && b.remote.entries[0].progress===20)")
+        print('PASS: concurrent chapter updates reconcile automatically with originals backed up.')
         browser.close()
 finally:
     if server:server.terminate();server.wait()

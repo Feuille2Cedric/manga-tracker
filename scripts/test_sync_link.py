@@ -10,6 +10,7 @@ try:
     with sync_playwright() as p:
         browser=p.chromium.launch(channel='msedge',headless=True)
         page=browser.new_page()
+        page.on('pageerror',lambda e:print('Browser error:',str(e)))
         page.goto('http://127.0.0.1:3369/')
         page.wait_for_function('window.tsugiSync?.client && window.tsugiSync?.db')
         page.evaluate("""async()=>{
@@ -52,6 +53,16 @@ try:
         assert '1 titres' in page.locator('#sync-status').text_content()
         page.locator('#library-grid .card-title').click(timeout=2000)
         assert page.locator('#open-reading-link').get_attribute('href')=='https://example.com/read'
+        page.locator('[name=progress]').fill('9')
+        page.evaluate("cloud.entries[0].readingUrl='https://example.com/new';cloud.entries[0].updated=Date.now()+10")
+        page.evaluate('async()=>{await tsugiSync.runCycle();}')
+        assert page.locator('[name=progress]').input_value()=='9'
+        assert page.evaluate("entryFor('manual:test').readingUrl")=='https://example.com/new'
+        page.locator('#progress-form button.primary').click()
+        assert page.evaluate("entryFor('manual:test').progress")==9
+        assert page.evaluate("entryFor('manual:test').readingUrl")=='https://example.com/new'
+        page.evaluate('async()=>{await tsugiSync.runCycle();}')
+        assert page.evaluate('cloud.entries[0].progress')==9
         browser.close()
         print('PASS: slow link save keeps page clickable; concurrent progress and link survive next sync.')
 finally:

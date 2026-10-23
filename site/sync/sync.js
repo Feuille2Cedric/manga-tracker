@@ -42,9 +42,9 @@
   buildUI(){
    const container=document.createElement('div');container.innerHTML=`<div class="sync-lock" hidden><p>Connecte-toi à ton compte pour retrouver tes informations.</p></div><div class="personal-sync"><span id="sync-status" role="status">Sur cet appareil</span><button id="sync-account">Synchroniser</button></div><dialog class="sync-dialog"><button class="sync-close" type="button">Fermer</button><h2>Mes données, partout.</h2><p>Connecte-toi avec la même adresse e-mail sur tes appareils. Tes données restent privées.</p><form id="sync-login"><label>Adresse e-mail<input id="sync-email" type="email" required autocomplete="email"></label><button>Recevoir un lien de connexion</button></form><div class="sync-actions" id="sync-connected" hidden><button id="sync-now">Synchroniser maintenant</button><button id="sync-logout">Se déconnecter</button></div><p class="sync-message" role="status"></p><div id="sync-conflict" hidden><p>Deux versions différentes existent. Exporte-les avant de choisir laquelle conserver.</p><div class="sync-actions"><button id="sync-backup">Exporter les deux versions</button><button id="sync-use-cloud" disabled>Garder la version en ligne</button><button id="sync-use-local" disabled>Garder celle de cet appareil</button></div></div></dialog>`;
    document.body.append(container);
-   q('#sync-account').onclick=()=>q('.sync-dialog').showModal();q('.sync-close').onclick=()=>q('.sync-dialog').close();
+   q('#sync-account').onclick=()=>{q('.sync-dialog').showModal();this.a.accountOpened?.();};q('.sync-close').onclick=()=>q('.sync-dialog').close();
    this.auth=new PersonalAuth(this);
-   q('#sync-now').onclick=()=>this.cycle();
+   q('#sync-now').onclick=()=>{if(this.pendingConflict){q('#sync-conflict').hidden=false;this.status('Action nécessaire · ouvrir Mon compte');}else this.cycle();};
    q('#sync-logout').onclick=async()=>{if(this.busy)return this.message('Attends la fin de la synchronisation.');const {error}=await this.client.auth.signOut({scope:'local'});if(error)this.message(error.message);else{this.user=null;this.lock(Boolean(this.meta.owner));this.authUI();}};
    q('#sync-backup').onclick=()=>this.backupConflict();
    q('#sync-use-cloud').onclick=()=>this.resolve('remote');q('#sync-use-local').onclick=()=>this.resolve('local');
@@ -52,13 +52,15 @@
   status(text){q('#sync-status').textContent=text;}
   message(text){q('.sync-message').textContent=text;}
   lock(value){q('.sync-lock').hidden=!value;document.querySelectorAll('main,aside').forEach(el=>el.inert=value);if(value)document.querySelectorAll('dialog:not(.sync-dialog)').forEach(el=>el.close());}
-  authUI(){this.auth.update();q('#sync-login').hidden=Boolean(this.user);q('#sync-connected').hidden=!this.user;q('#sync-account').textContent=this.user?'Mon compte':'Se connecter';this.status(this.user?'Connexion établie':'Sur cet appareil');}
+  authUI(){this.auth.update();q('#sync-login').hidden=Boolean(this.user);q('#sync-connected').hidden=!this.user;q('#sync-account').textContent=this.user?'Mon compte':'Se connecter';if(!this.user)this.status('Sur cet appareil');else if(this.pendingConflict)this.status('Action nécessaire · ouvrir Mon compte');}
+  pendingLabel(){const n=this.a.pending?.(this.meta.base)||0;return n?n+' modification'+(n>1?'s':'')+' en attente':'Vérification…';}
+  editingBlocks(){return !this.a.syncWhileEditing&&this.a.editing();}
   async init(){
    const opening=indexedDB.open('personal-app-sync',1);opening.onupgradeneeded=()=>opening.result.createObjectStore('meta');this.db=await get(opening);
    this.meta=await get(this.db.transaction('meta').objectStore('meta').get(this.a.app))||{};
    const c=window.PERSONAL_SYNC_CONFIG;
    if(!c?.url||!c?.key||!window.supabase){this.status('Synchronisation à activer');return;}
-   this.client=window.supabase.createClient(c.url,c.key,{auth:{storageKey:'personal-app-auth',persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+   this.client=window.supabase.createClient(c.url,c.key,{global:{fetch:syncFetch},auth:{storageKey:'personal-app-auth',persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
    this.client.auth.onAuthStateChange((event,session)=>{setTimeout(()=>{if(event==='PASSWORD_RECOVERY')this.auth.recovery=true;this.user=session?.user||null;this.checkAccount();},0);});
    const {data,error}=await this.client.auth.getSession();if(error)this.message(error.message);
    this.user=data?.session?.user||null;this.checkAccount();
@@ -73,7 +75,7 @@
    if(mismatch)this.message('Ce navigateur contient les données d’un autre compte. Reconnecte-toi au compte initial ou utilise un profil de navigateur séparé.');
    if(this.user&&!mismatch)this.cycle();
   }
-  mark(){if(this.applying)return;this.generation++;this.status(this.user?'Modifications à synchroniser':'Sur cet appareil');clearTimeout(this.timer);this.timer=setTimeout(()=>this.cycle(),250);}
+  mark(){if(this.applying)return;this.generation++;this.status(this.user?this.pendingLabel():'Enregistré sur cet appareil');clearTimeout(this.timer);this.timer=setTimeout(()=>this.cycle(),250);}
   async metadata(value){const tx=this.db.transaction('meta','readwrite'),wait=completed(tx);tx.objectStore('meta').put(value,this.a.app);await wait;this.meta=value;}
   async path(id){return `${this.cycleOwner||this.user.id}/${this.a.app}/${await digest(id)}`;}
   async remote(){const {data,error}=await this.io.from('personal_app_state').select('revision,document').eq('app',this.a.app).eq('owner_id',this.cycleOwner).maybeSingle();if(error)throw error;return data||{revision:0,document:this.a.empty()};}
@@ -92,18 +94,18 @@
    }return downloaded;
   }
   async cycle(){
-   if(navigator.locks)return navigator.locks.request('personal-sync-'+this.a.app,{ifAvailable:true},lock=>lock?this.runCycle():undefined);
+   if(navigator.locks)return navigator.locks.request('personal-sync-'+this.a.app,{ifAvailable:true},lock=>{if(lock)return this.runCycle();if(this.user&&!this.busy)this.status('Synchronisation dans un autre onglet');});
    return this.runCycle();
   }
   async runCycle(){
    if(!this.client||!this.user||this.auth.recovery||this.busy||this.pendingConflict||this.meta.owner&&this.meta.owner!==this.user.id)return;
-   if(this.a.editing()){this.status('Écriture en cours · envoi après fermeture de l’éditeur');return;}
+   if(this.editingBlocks()){this.status('Écriture en cours · envoi après fermeture de l’éditeur');return;}
    this.busy=true;const owner=this.user.id;let release=()=>{};
    try{
     if(!navigator.onLine)throw Error('Hors connexion. Tes changements restent sur cet appareil.');
     const {data:auth,error:authError}=await bounded(this.client.auth.getSession());
     if(authError)throw authError;
-    if(auth.session?.user.id!==owner)return;
+    if(auth.session?.user.id!==owner){this.user=auth.session?.user||null;this.checkAccount();this.status(this.user?'Vérifie le compte connecté':'Session expirée · reconnecte-toi');return;}
     // Pin every request to this account, even if another tab changes the session.
     const c=window.PERSONAL_SYNC_CONFIG;
     this.cycleOwner=owner;
@@ -114,11 +116,11 @@
     if(!meta.owner)await this.metadata({...meta,owner});
     const ticket=this.generation,local=await this.a.read(),remote=await this.remote();
     let merged;
-    try{merged=merge(meta.base||this.a.empty(),local,remote.document);}catch(e){this.pendingConflict={local,remote};q('#sync-conflict').hidden=false;q('.sync-dialog').showModal();this.message('Les modifications simultanées ne peuvent pas être fusionnées automatiquement.');this.status('Choix de version nécessaire');return;}
+    try{merged=this.a.merge?this.a.merge(meta.base||this.a.empty(),local,remote.document):merge(meta.base||this.a.empty(),local,remote.document);}catch(e){this.pendingConflict={local,remote};q('#sync-conflict').hidden=false;q('.sync-dialog').showModal();this.message('La synchronisation demande une vérification : '+e.message);this.status('Action nécessaire · ouvrir Mon compte');return;}
     this.status('Synchronisation…');
     const images=await this.images(merged,remote.document);
     try{await this.a.validate(merged,images);}catch(e){this.pendingConflict={local,remote};q('#sync-conflict').hidden=false;q('.sync-dialog').showModal();this.message('Ces versions ne peuvent pas être réunies : '+e.message);this.status('Choix de version nécessaire');return;}
-    if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner){if(this.generation!==ticket)this.retrySoon=true;return;}
+    if(this.generation!==ticket||this.editingBlocks()||this.user?.id!==owner||!same(await this.a.read(),local)){this.retrySoon=true;return;}
     // Network requests must never lock the page: a slow save can take indefinitely.
     let rev=remote.revision;
     if(!same(merged,remote.document)||!rev){
@@ -128,14 +130,15 @@
     }
     // If edits happened during the save, retain the previous merge base and local
     // document. The next cycle reconciles them with the snapshot just saved.
-    if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner){if(this.generation!==ticket)this.retrySoon=true;return;}
+    if(this.generation!==ticket||this.editingBlocks()||this.user?.id!==owner||!same(await this.a.read(),local)){this.retrySoon=true;return;}
     release=this.a.freeze();
     if(!same(local,merged)||this.a.current&&!same(this.a.current(),merged)){this.applying=true;await this.a.apply(merged,images);this.applying=false;}
-    await this.metadata({owner,revision:rev,base:merged});
+    const savedAt=new Date().toISOString();
+    await this.metadata({owner,revision:rev,base:merged,savedAt});
     const count=Array.isArray(merged.entries)?merged.entries.length:null;
     this.status('✓ Synchronisé'+(count===null?'':' · '+count+' titres'));
-    this.message('Connecté : '+this.user.email+'\n'+(count===null?'':merged.entries.filter(e=>e.kind==='manga').length+' mangas · '+merged.entries.filter(e=>e.kind==='anime').length+' animés sauvegardés\n')+'Version serveur : '+rev+'\nTes données sont à jour.');
-   }catch(e){this.status(navigator.onLine?'Synchronisation en attente':'Hors connexion');this.message('Tes données locales sont conservées. '+(e.message||'Réessaie dans quelques instants.'));}
+    this.message('Connecté : '+this.user.email+'\n'+(count===null?'':merged.entries.filter(e=>e.kind==='manga').length+' mangas · '+merged.entries.filter(e=>e.kind==='anime').length+' animés sauvegardés\n')+'Dernière vérification : '+new Date(savedAt).toLocaleTimeString('fr-FR')+'\nVersion serveur : '+rev);
+   }catch(e){this.status((navigator.onLine?'En attente · ':'Hors connexion · ')+this.pendingLabel());this.message('Tes données locales sont conservées. Une nouvelle tentative aura lieu automatiquement.\n'+(e.message||'Serveur indisponible.'));}
    finally{this.applying=false;release();this.lock(Boolean(this.meta.owner&&this.meta.owner!==this.user?.id));this.busy=false;this.cycleOwner=null;if(this.retrySoon){this.retrySoon=false;clearTimeout(this.timer);this.timer=setTimeout(()=>this.cycle(),300);}}
   }
   async backupConflict(){
