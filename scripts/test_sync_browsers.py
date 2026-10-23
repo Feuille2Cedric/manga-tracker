@@ -37,19 +37,36 @@ try:
         b.reload();b.wait_for_function("tsugiSync?.user && tsugiSync.meta.base?.entries[0]?.progress===12",timeout=30000)
         print('PASS: same-account login, manga A to B, chapter and link B to A, session after reload.')
         # A request that never replies must not leave sync permanently busy.
-        stalled=[]
-        a.route('**/rest/v1/rpc/personal_app_save',lambda route:stalled.append(route))
+        a.evaluate("""()=>{
+            window.realFetch=window.fetch;
+            window.fetch=(url,options={})=>String(url).includes('/rest/v1/rpc/personal_app_save')
+                ?new Promise((resolve,reject)=>{options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true});})
+                :window.realFetch(url,options);
+        }""")
         a.locator('[data-increment]').click()
         a.wait_for_function('tsugiSync.busy',timeout=5000)
         a.wait_for_function("!tsugiSync.busy && document.querySelector('#sync-status').textContent.includes('attente')",timeout=22000)
         assert a.evaluate('TsugiApp.read().entries[0].progress')==13
-        a.unroute('**/rest/v1/rpc/personal_app_save')
-        for route in stalled:route.abort()
+        a.evaluate('window.fetch=window.realFetch')
         a.evaluate("window.dispatchEvent(new Event('online'))")
         a.wait_for_function('tsugiSync.meta.base?.entries[0]?.progress===13',timeout=20000)
         b.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
         b.wait_for_function('TsugiApp.read().entries[0]?.progress===13',timeout=20000)
         print('PASS: stalled upload times out, keeps local progress, retries and reaches other browser.')
+        # Three additions made while disconnected must survive independent changes
+        # on the other PC, then converge without replacing either library.
+        a.context.set_offline(True)
+        a.evaluate("""()=>{for(let i=1;i<=3;i++){
+            persist({entries:[...library.entries,{id:'manual:offline-'+i,kind:'manga',title:'Offline manga '+i,progress:i,status:'reading',manualTotal:50,muId:null,updated:Date.now()}]});
+        }}""")
+        b.locator('[data-increment]').click()
+        b.wait_for_function('tsugiSync.meta.base?.entries[0]?.progress===14',timeout=20000)
+        a.context.set_offline(False)
+        a.wait_for_function('tsugiSync.meta.base?.entries.length===4',timeout=25000)
+        b.wait_for_function('TsugiApp.read().entries.length===4',timeout=25000)
+        assert a.evaluate('TsugiApp.read()')==b.evaluate('TsugiApp.read()')
+        assert a.evaluate('TsugiApp.read().entries[0].progress')==14
+        print('PASS: three offline manga additions merge with progress from the other PC.')
         browser.close()
 finally:
     if server:server.terminate();server.wait()

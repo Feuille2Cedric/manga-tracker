@@ -45,6 +45,11 @@ try:
         }""")
         assert page.evaluate('cloud.entries[0].progress')==7
         assert page.evaluate('cloud.entries[0].readingUrl')=='https://example.com/read'
+        # A stale in-memory view must be reconciled even if storage equals cloud.
+        page.evaluate("library.entries[0].progress=2;render()")
+        page.evaluate('async()=>{await tsugiSync.runCycle();}')
+        assert page.evaluate("entryFor('manual:test').progress")==7
+        assert '1 titres' in page.locator('#sync-status').text_content()
         page.locator('#library-grid .card-title').click(timeout=2000)
         assert page.locator('#open-reading-link').get_attribute('href')=='https://example.com/read'
         browser.close()

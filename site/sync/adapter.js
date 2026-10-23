@@ -5,6 +5,9 @@
     nodes.forEach(el=>el.inert=true);
     return()=>nodes.forEach((el,i)=>el.inert=values[i]);
   },apply:async doc=>{TsugiApp.apply(doc);setTimeout(()=>TsugiApp.refreshAll(true),0);}};
+  // Storage and the displayed library may diverge after another tab writes.
+  // Reconcile both before reporting a successful synchronization.
+  adapter.current=()=>TsugiApp.read();
   window.tsugiSync=new PersonalSync(adapter);
   try{await tsugiSync.init();TsugiApp.refreshAll(true);}catch(e){tsugiSync.message('Synchronisation indisponible : '+e.message);}
 })();

@@ -36,7 +36,7 @@
  const q=s=>document.querySelector(s);
  const networkTimeout=15000;
  const bounded=(promise)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Le serveur met trop de temps à répondre. Nouvelle tentative automatique.')),networkTimeout);})]).finally(()=>clearTimeout(timer));};
- const syncFetch=(url,options={})=>fetch(url,{...options,signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(networkTimeout)]):AbortSignal.timeout(networkTimeout)});
+ const syncFetch=(url,options={})=>fetch(url,{...options,cache:'no-store',signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(networkTimeout)]):AbortSignal.timeout(networkTimeout)});
  class PersonalSync {
   constructor(adapter){this.a=adapter;this.generation=0;this.busy=false;this.applying=false;this.pendingConflict=null;this.user=null;this.meta={};this.buildUI();}
   buildUI(){
@@ -130,9 +130,11 @@
     // document. The next cycle reconciles them with the snapshot just saved.
     if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner){if(this.generation!==ticket)this.retrySoon=true;return;}
     release=this.a.freeze();
-    if(!same(local,merged)){this.applying=true;await this.a.apply(merged,images);this.applying=false;}
+    if(!same(local,merged)||this.a.current&&!same(this.a.current(),merged)){this.applying=true;await this.a.apply(merged,images);this.applying=false;}
     await this.metadata({owner,revision:rev,base:merged});
-    this.status('✓ Synchronisé');this.message('Connecté : '+this.user.email+'\nTes données sont à jour.');
+    const count=Array.isArray(merged.entries)?merged.entries.length:null;
+    this.status('✓ Synchronisé'+(count===null?'':' · '+count+' titres'));
+    this.message('Connecté : '+this.user.email+'\n'+(count===null?'':merged.entries.filter(e=>e.kind==='manga').length+' mangas · '+merged.entries.filter(e=>e.kind==='anime').length+' animés sauvegardés\n')+'Version serveur : '+rev+'\nTes données sont à jour.');
    }catch(e){this.status(navigator.onLine?'Synchronisation en attente':'Hors connexion');this.message('Tes données locales sont conservées. '+(e.message||'Réessaie dans quelques instants.'));}
    finally{this.applying=false;release();this.lock(Boolean(this.meta.owner&&this.meta.owner!==this.user?.id));this.busy=false;this.cycleOwner=null;if(this.retrySoon){this.retrySoon=false;clearTimeout(this.timer);this.timer=setTimeout(()=>this.cycle(),300);}}
   }

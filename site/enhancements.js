@@ -8,6 +8,9 @@
     trophyMatches=rows.length;trophyPage=Math.max(1,Math.min(trophyPage,Math.ceil(rows.length/PAGE_SIZE)||1));return rows.slice((trophyPage-1)*PAGE_SIZE,trophyPage*PAGE_SIZE);
   }
   function renderExtra(visible){
+    if(!$('#library-display-summary'))$('#library-grid').insertAdjacentHTML('beforebegin','<p id="library-display-summary" class="muted" role="status"></p>');
+    const allOfKind=library.entries.filter(e=>e.kind===kind),excluded=allOfKind.filter(e=>metaFor(e).blocked).length;
+    $('#library-display-summary').textContent=visible.length===allOfKind.length?'':visible.length+' sur '+allOfKind.length+' '+(kind==='manga'?'mangas':'animés')+' affichés'+(excluded?' · '+excluded+' contenu(s) exclu(s) du catalogue':' · recherche ou catégorie active');
     visibleIds=visible.map(e=>e.id);selected=new Set([...selected].filter(id=>entryFor(id)));
     const entries=library.entries.filter(e=>e.kind===kind&&!metaFor(e).blocked);
     const names={all:'Tout',reading:'En cours',caught:'À jour',completed:'Terminés',planned:kind==='manga'?'À lire':'À voir',paused:'En pause',dropped:'Abandonnés'};
