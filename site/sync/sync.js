@@ -34,6 +34,9 @@
  const dataURL=blob=>new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(blob);});
  const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))).map(v=>v.toString(16).padStart(2,'0')).join('');
  const q=s=>document.querySelector(s);
+ const networkTimeout=15000;
+ const bounded=(promise)=>{let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Le serveur met trop de temps à répondre. Nouvelle tentative automatique.')),networkTimeout);})]).finally(()=>clearTimeout(timer));};
+ const syncFetch=(url,options={})=>fetch(url,{...options,signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(networkTimeout)]):AbortSignal.timeout(networkTimeout)});
  class PersonalSync {
   constructor(adapter){this.a=adapter;this.generation=0;this.busy=false;this.applying=false;this.pendingConflict=null;this.user=null;this.meta={};this.buildUI();}
   buildUI(){
@@ -60,6 +63,7 @@
    const {data,error}=await this.client.auth.getSession();if(error)this.message(error.message);
    this.user=data?.session?.user||null;this.checkAccount();
    this.interval=setInterval(()=>this.cycle(),15000);window.addEventListener('online',()=>this.cycle());window.addEventListener('focus',()=>this.cycle());
+   document.addEventListener('visibilitychange',()=>this.cycle());
    await this.cycle();
   }
   checkAccount(){
@@ -69,7 +73,7 @@
    if(mismatch)this.message('Ce navigateur contient les données d’un autre compte. Reconnecte-toi au compte initial ou utilise un profil de navigateur séparé.');
    if(this.user&&!mismatch)this.cycle();
   }
-  mark(){if(this.applying)return;this.generation++;this.status(this.user?'Modifications à synchroniser':'Sur cet appareil');clearTimeout(this.timer);this.timer=setTimeout(()=>this.cycle(),1800);}
+  mark(){if(this.applying)return;this.generation++;this.status(this.user?'Modifications à synchroniser':'Sur cet appareil');clearTimeout(this.timer);this.timer=setTimeout(()=>this.cycle(),250);}
   async metadata(value){const tx=this.db.transaction('meta','readwrite'),wait=completed(tx);tx.objectStore('meta').put(value,this.a.app);await wait;this.meta=value;}
   async path(id){return `${this.cycleOwner||this.user.id}/${this.a.app}/${await digest(id)}`;}
   async remote(){const {data,error}=await this.io.from('personal_app_state').select('revision,document').eq('app',this.a.app).eq('owner_id',this.cycleOwner).maybeSingle();if(error)throw error;return data||{revision:0,document:this.a.empty()};}
@@ -97,13 +101,13 @@
    this.busy=true;const owner=this.user.id;let release=()=>{};
    try{
     if(!navigator.onLine)throw Error('Hors connexion. Tes changements restent sur cet appareil.');
-    const {data:auth,error:authError}=await this.client.auth.getSession();
+    const {data:auth,error:authError}=await bounded(this.client.auth.getSession());
     if(authError)throw authError;
     if(auth.session?.user.id!==owner)return;
     // Pin every request to this account, even if another tab changes the session.
     const c=window.PERSONAL_SYNC_CONFIG;
     this.cycleOwner=owner;
-    this.io=window.supabase.createClient(c.url,c.key,{accessToken:async()=>auth.session.access_token});
+    this.io=window.supabase.createClient(c.url,c.key,{accessToken:async()=>auth.session.access_token,global:{fetch:syncFetch}});
     const meta=await get(this.db.transaction('meta').objectStore('meta').get(this.a.app))||{};this.meta=meta;
     if(this.user?.id!==owner)return;
     if(meta.owner&&meta.owner!==owner)return this.checkAccount();
@@ -114,23 +118,23 @@
     this.status('Synchronisation…');
     const images=await this.images(merged,remote.document);
     try{await this.a.validate(merged,images);}catch(e){this.pendingConflict={local,remote};q('#sync-conflict').hidden=false;q('.sync-dialog').showModal();this.message('Ces versions ne peuvent pas être réunies : '+e.message);this.status('Choix de version nécessaire');return;}
-    if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner)return;
+    if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner){if(this.generation!==ticket)this.retrySoon=true;return;}
     // Network requests must never lock the page: a slow save can take indefinitely.
     let rev=remote.revision;
     if(!same(merged,remote.document)||!rev){
      const {data,error}=await this.io.rpc('personal_app_save',{p_app:this.a.app,p_revision:rev,p_document:merged});if(error)throw error;
-     if(data.conflict){this.status('Autre appareil actif · nouvelle tentative…');return;}
+     if(data.conflict){this.retrySoon=true;this.status('Autre appareil actif · nouvelle tentative…');return;}
      rev=data.revision;
     }
     // If edits happened during the save, retain the previous merge base and local
     // document. The next cycle reconciles them with the snapshot just saved.
-    if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner)return;
+    if(this.generation!==ticket||this.a.editing()||this.user?.id!==owner){if(this.generation!==ticket)this.retrySoon=true;return;}
     release=this.a.freeze();
     if(!same(local,merged)){this.applying=true;await this.a.apply(merged,images);this.applying=false;}
     await this.metadata({owner,revision:rev,base:merged});
     this.status('✓ Synchronisé');this.message('Connecté : '+this.user.email+'\nTes données sont à jour.');
    }catch(e){this.status(navigator.onLine?'Synchronisation en attente':'Hors connexion');this.message('Tes données locales sont conservées. '+(e.message||'Réessaie dans quelques instants.'));}
-   finally{this.applying=false;release();this.lock(Boolean(this.meta.owner&&this.meta.owner!==this.user?.id));this.busy=false;this.cycleOwner=null;}
+   finally{this.applying=false;release();this.lock(Boolean(this.meta.owner&&this.meta.owner!==this.user?.id));this.busy=false;this.cycleOwner=null;if(this.retrySoon){this.retrySoon=false;clearTimeout(this.timer);this.timer=setTimeout(()=>this.cycle(),300);}}
   }
   async backupConflict(){
    try{
