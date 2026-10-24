@@ -1,4 +1,4 @@
-/* Shared private sync for Curio and Mes apps. Images are immutable and separate. */
+﻿/* Shared private sync for Curio and Mes apps. Images are immutable and separate. */
 (() => {
  'use strict';
  const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
@@ -40,7 +40,7 @@
  class PersonalSync {
   constructor(adapter){this.a=adapter;this.generation=0;this.busy=false;this.applying=false;this.pendingConflict=null;this.user=null;this.meta={};this.buildUI();}
   buildUI(){
-   const container=document.createElement('div');container.innerHTML=`<div class="sync-lock" hidden><p>Connecte-toi à ton compte pour retrouver tes informations.</p></div><div class="personal-sync"><span id="sync-status" role="status">Sur cet appareil</span><button id="sync-account">Synchroniser</button></div><dialog class="sync-dialog"><button class="sync-close" type="button">Fermer</button><h2>Mes données, partout.</h2><p>Connecte-toi avec la même adresse e-mail sur tes appareils. Tes données restent privées.</p><form id="sync-login"><label>Adresse e-mail<input id="sync-email" type="email" required autocomplete="email"></label><button>Recevoir un lien de connexion</button></form><div class="sync-actions" id="sync-connected" hidden><button id="sync-now">Synchroniser maintenant</button><button id="sync-logout">Se déconnecter</button></div><p class="sync-message" role="status"></p><div id="sync-conflict" hidden><p>Deux versions différentes existent. Exporte-les avant de choisir laquelle conserver.</p><div class="sync-actions"><button id="sync-backup">Exporter les deux versions</button><button id="sync-use-cloud" disabled>Garder la version en ligne</button><button id="sync-use-local" disabled>Garder celle de cet appareil</button></div></div></dialog>`;
+   const container=document.createElement('div');container.innerHTML=`<div class="sync-lock" hidden><p>Connecte-toi à ton compte pour retrouver tes informations.</p></div><div class="personal-sync"><span id="sync-status" role="status">Sur cet appareil</span><button id="sync-account">Se connecter</button></div><dialog class="sync-dialog"><button class="sync-close" type="button">Fermer</button><h2>Mes données, partout.</h2><p>Connecte-toi avec la même adresse e-mail sur tes appareils. Tes données restent privées.</p><form id="sync-login"><label>Adresse e-mail<input id="sync-email" type="email" required autocomplete="email"></label><button>Recevoir un lien de connexion</button></form><div class="sync-actions" id="sync-connected" hidden><button id="sync-now">Synchroniser maintenant</button><button id="sync-logout">Se déconnecter</button></div><p class="sync-message" role="status"></p><div id="sync-conflict" hidden><p>Deux versions différentes existent. Exporte-les avant de choisir laquelle conserver.</p><div class="sync-actions"><button id="sync-backup">Exporter les deux versions</button><button id="sync-use-cloud" disabled>Garder la version en ligne</button><button id="sync-use-local" disabled>Garder celle de cet appareil</button></div></div></dialog>`;
    document.body.append(container);
    q('#sync-account').onclick=()=>{q('.sync-dialog').showModal();this.a.accountOpened?.();};q('.sync-close').onclick=()=>q('.sync-dialog').close();
    this.auth=new PersonalAuth(this);
@@ -162,3 +162,4 @@
  }
  window.PersonalSync=PersonalSync;window.PersonalSyncMerge=merge;
 })();
+
